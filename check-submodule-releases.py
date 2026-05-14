@@ -100,7 +100,7 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
     all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
     current = max(head_versions) if head_versions else None
-    pinned = (not 'branch' in module)
+    pinned = not 'branch' in module
     patch, minor, major = find_updates(current, all_versions)
 
     return SemverUpdates(
@@ -117,7 +117,9 @@ def print_updates_table(results: list[SemverUpdates]) -> None:
          r.current.tag if r.current else '-',
          r.patch.tag if r.patch else '-',
          r.minor.tag if r.minor else '-',
-         r.major.tag if r.major else '-']
+         r.major.tag if r.major else '-',
+         '' if r.pinned else 'not pinned',
+        ]
         for r in results
     ]
     widths = [max(len(c) for c in col) for col in zip(headers, *rows)]
