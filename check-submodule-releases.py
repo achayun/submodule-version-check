@@ -81,14 +81,44 @@ def fetch_tags(abspath: str):
     result = git(args, cwd=abspath)
 
 
+def update_module(path: str, root: str, tag: str)  -> str:
+    abspath = os.path.abspath(os.path.join(root, path))
+    # # Step 1: Checkout the new submodule tag
+    git(['checkout', tag], cwd=abspath)
+    # Step 2: Stage  the submodule
+    git(['add', abspath], cwd=root)
+
+
 class SemverUpdates(NamedTuple):
     path: str
     current: Semver | str
     patch: Semver | None
     minor: Semver | None
     major: Semver | None
-    pinned: bool
+    branch: str | None
 
+
+def update_submodules(root: str, updates: list[SemverUpdates], update_policy: str):
+    for update in updates:
+        if update.branch:
+            print(f"Module {update.path} - Skipping, not pinned, following branch {update.branch}")
+            continue
+        # TODO: Can be more elegant
+        latest = None
+        if update_policy == 'patch' and update.patch:
+            latest = update.patch
+            update_module(update.path, root, latest.tag)
+        elif update_policy == 'minor' and (update.minor or update.patch):
+            latest = max(filter(None, [update.minor, update.patch]))
+            update_module(update.path, root, latest.tag)
+        elif update_policy == 'major' and (update.major or update.minor or update.patch):
+            latest = max(filter(None, [update.major, update.minor, update.patch]))
+            update_module(update.path, root, latest.tag)
+        else:
+            print(f"Module {update.path} - Skipping, not suitable update found")   # TODO: Should probably print branch
+        if latest != None:
+            # TODO: Should probably print hash(tag)
+            print(f"Updated {update.path} from {update.current.tag or '-'} to {latest.tag}")
 
 def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     path = module['path']
@@ -100,13 +130,13 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
     all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
     current = max(head_versions) if head_versions else None
-    pinned = not 'branch' in module
+    branch = module['branch']
     patch, minor, major = find_updates(current, all_versions)
 
     return SemverUpdates(
         path  =  path, current=current,
         patch  =  patch, minor=minor, major = major,
-        pinned = pinned,
+        branch = branch,
     )
 
 
@@ -118,7 +148,7 @@ def print_updates_table(results: list[SemverUpdates]) -> None:
          r.patch.tag if r.patch else '-',
          r.minor.tag if r.minor else '-',
          r.major.tag if r.major else '-',
-         '' if r.pinned else 'not pinned',
+         r.branch if r.branch else '-',
         ]
         for r in results
     ]
@@ -133,7 +163,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description='Check git submodules for newer semver releases.',
     )
-    parser.add_argument('root', nargs='?', default='.', help='repository root (default: cwd)')
+    parser.add_argument('--root', default='.', help='repository root (default: cwd)')
+    parser.add_argument('update', nargs='?', const=True, help='Perform update on suitable packages')
+    parser.add_argument('--update-policy', default='patch', choices=['patch', 'minor', 'major'], help='Update policy (default: patch)')
     args = parser.parse_args()
     root = os.path.abspath(args.root)
     try:
@@ -145,7 +177,8 @@ def main() -> None:
     modules = parse_gitmodules(git_root)
     results = [r for module in modules.values() if (r := check_submodule_updates(module, git_root))]
     print_updates_table(results)
-
+    if len(results) and args.update:
+        update_submodules(git_root, results, args.update_policy)
 
 if __name__ == '__main__':
     main()
