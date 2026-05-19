@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import NamedTuple
+from typing import NamedTuple, NoReturn
 
 # Regex to break a semver string to a tuple.
 # Based on: https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
@@ -82,11 +82,22 @@ def fetch_tags(abspath: str):
     result = git(args, cwd=abspath)
 
 
-def update_module(path: str, root: str, tag: str) -> str:
+def check_submodule_clean(path: str, root: str) -> str | None:
     abspath = os.path.abspath(os.path.join(root, path))
-    # Step 1: Checkout the new submodule tag
-    git(['checkout', tag], cwd=abspath)
-    # Step 2: Stage  the submodule
+    if not os.path.isfile(os.path.join(abspath, '.git')):
+        return(f"submodule not initialized")
+    if git(['status', '--porcelain', '--untracked-files=no'], cwd=abspath):
+        return "working tree has uncommitted changes"
+    head = git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
+    recorded = git(['rev-parse', '--short', f'HEAD:{path}'], cwd=root)
+    if head != recorded:
+        return f"HEAD {head} does not match recorded gitlink {recorded}"
+    return None
+
+
+def update_submodule(path: str, root: str, tag: str) -> str:
+    abspath = os.path.abspath(os.path.join(root, path))
+    git(['checkout', '--recurse-submodules', tag], cwd=abspath)
     git(['add', abspath], cwd=root)
     return git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
 
@@ -127,8 +138,10 @@ def update_submodules(root: str, updates: list[SemverUpdates], update_policy: st
           to_ver, to_sha, skip_reason = None, None, None
           if update.branch:
               skip_reason = f"not pinned, following branch {update.branch}"
+          elif module_err := check_submodule_clean(update.path, root):
+              skip_reason = f"module state not clean: {module_err}"
           elif to_ver := latest_ver(update_policy, update):
-              to_sha = update_module(update.path, root, to_ver.tag)
+              to_sha = update_submodule(update.path, root, to_ver.tag)
           else:
               skip_reason = "no suitable update found"
           results.append(UpdateResult(update.path, update.current, current_sha, to_ver, to_sha, skip_reason))
@@ -179,7 +192,7 @@ def format_commit_message(results: list[UpdateResult]) -> str:
 def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     path = module['path']
     abspath = os.path.abspath(os.path.join(root, path))
-    if not os.path.isdir(abspath):
+    if not os.path.isfile(os.path.join(abspath, '.git')):
         raise Exception(f"Cannot find submodule at path: '{abspath}'")
 
     fetch_tags(abspath)
@@ -215,34 +228,44 @@ def print_updates_table(results: list[SemverUpdates]) -> None:
         print(fmt.format(*row))
 
 
+def fatal(msg: str, exit_code: int) -> NoReturn:
+    print(msg)
+    sys.exit(exit_code)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Check git submodules for newer semver releases.',
     )
     parser.add_argument('--root', default='.', help='repository root (default: cwd)')
-    parser.add_argument('update', nargs='?', const=True, help='Perform update on suitable packages')
+    parser.add_argument('--update', action='store_true', help='Perform updates on suitable submodules')
     parser.add_argument('--update-policy', default='patch', choices=['patch', 'minor', 'major'], help='Update policy (default: patch)')
     args = parser.parse_args()
     root = os.path.abspath(args.root)
     try:
         git_root = git(['rev-parse', '--show-toplevel'], root)
     except subprocess.CalledProcessError as e:
-        print(e.stderr.strip())
-        sys.exit(127)
+        fatal(f"error: not inside a git repository: {root}", 127)
 
     modules = parse_gitmodules(git_root)
-    results = [r for module in modules.values() if (r := check_submodule_updates(module, git_root))]
+    if not modules:
+        fatal(f"No submodules found in {git_root}", 0)
+
+    results = [check_submodule_updates(m, git_root) for m in modules.values()]
     print_updates_table(results)
-    if len(results) and args.update:
-        results = update_submodules(git_root, results, args.update_policy)
-        message = format_commit_message(results)
-        print(message)
-        if any(r.to_ver for r in results):
-            dot_git_dir = git(['rev-parse', '--absolute-git-dir'], cwd=git_root)
-            msg_path = write_commit_message(dot_git_dir, message)
-            print_commit_hint(msg_path)
-        else:
-            sys.exit(1)
+
+    if not args.update:
+        return
+
+    results = update_submodules(git_root, results, args.update_policy)
+    message = format_commit_message(results)
+    print(message)
+    if any(r.to_ver for r in results):
+        dot_git_dir = git(['rev-parse', '--absolute-git-dir'], cwd=git_root)
+        msg_path = write_commit_message(dot_git_dir, message)
+        print_commit_hint(msg_path)
+    else:
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
