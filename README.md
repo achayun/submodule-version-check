@@ -30,8 +30,10 @@ Submodules that are configured to track a branch in .gitmodules are skipped in t
 
 ## Limitations
 
-`gustav` is not a package manager. It does not resolve dependency constraints, compatibility rules, release metadata, changelogs, or transitive requirements.
+`gustav` does not resolve dependency constraints, compatibility rules, release metadata, changelogs, or transitive requirements.
 
 Results depend on repositories using meaningful semver-like tags. Repositories with missing, inconsistent, misleading, or unconventional version tags may produce incomplete or noisy results.
 
-When in doubt, review the selected candidates manually. Just feed him a spot.
+When in doubt, review the selected candidates manually.
+
+`gustav` is not a package manager; Just feed him a spot.

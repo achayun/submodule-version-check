@@ -9,7 +9,7 @@ from typing import NamedTuple
 
 # Regex to break a semver string to a tuple.
 # Based on: https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-# Modified to:
+# Modifications:
 # * Accept optional 'v' prefix (e.g. v1.2.3)
 # * Case insensitive match
 # * Make Patch optional (e.g. 1.2 -> 1.2.0)
@@ -47,6 +47,7 @@ def parse_tags_to_semver(tags: list[str]) -> list[Semver]:
 def find_updates(current: Semver | None, versions: list[Semver]) -> list[Semver]:
     if current is None:
         return None, None, max(versions, default=None)
+
     newer = [v for v in versions if v > current]
     patch = max((v for v in newer if v.major == current.major and v.minor == current.minor), default=None)
     minor = max((v for v in newer if v.major == current.major and v.minor > current.minor), default=None)
@@ -81,12 +82,13 @@ def fetch_tags(abspath: str):
     result = git(args, cwd=abspath)
 
 
-def update_module(path: str, root: str, tag: str)  -> str:
+def update_module(path: str, root: str, tag: str) -> str:
     abspath = os.path.abspath(os.path.join(root, path))
-    # # Step 1: Checkout the new submodule tag
+    # Step 1: Checkout the new submodule tag
     git(['checkout', tag], cwd=abspath)
     # Step 2: Stage  the submodule
     git(['add', abspath], cwd=root)
+    return git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
 
 
 class SemverUpdates(NamedTuple):
@@ -98,27 +100,81 @@ class SemverUpdates(NamedTuple):
     branch: str | None
 
 
-def update_submodules(root: str, updates: list[SemverUpdates], update_policy: str):
-    for update in updates:
-        if update.branch:
-            print(f"Module {update.path} - Skipping, not pinned, following branch {update.branch}")
-            continue
-        # TODO: Can be more elegant
-        latest = None
-        if update_policy == 'patch' and update.patch:
-            latest = update.patch
-            update_module(update.path, root, latest.tag)
-        elif update_policy == 'minor' and (update.minor or update.patch):
-            latest = max(filter(None, [update.minor, update.patch]))
-            update_module(update.path, root, latest.tag)
-        elif update_policy == 'major' and (update.major or update.minor or update.patch):
-            latest = max(filter(None, [update.major, update.minor, update.patch]))
-            update_module(update.path, root, latest.tag)
-        else:
-            print(f"Module {update.path} - Skipping, not suitable update found")   # TODO: Should probably print branch
-        if latest != None:
-            # TODO: Should probably print hash(tag)
-            print(f"Updated {update.path} from {update.current.tag or '-'} to {latest.tag}")
+class UpdateResult(NamedTuple):
+    path: str
+    from_ver: Semver | None
+    from_sha: str | None
+    to_ver: Semver | None
+    to_sha: str | None
+    skip_reason: str | None
+
+
+def latest_ver(update_policy: str, update: SemverUpdates) -> Semver | None:
+    if update_policy == 'patch' and update.patch:
+        return update.patch
+    elif update_policy == 'minor' and (update.minor or update.patch):
+        return max(filter(None, [update.minor, update.patch]))
+    elif update_policy == 'major' and (update.major or update.minor or update.patch):
+        return max(filter(None, [update.major, update.minor, update.patch]))
+    return None
+
+
+def update_submodules(root: str, updates: list[SemverUpdates], update_policy: str) -> list[UpdateResult]:
+      results: list[UpdateResult] = []
+      for update in updates:
+          abspath = os.path.abspath(os.path.join(root, update.path))
+          current_sha = git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
+          to_ver, to_sha, skip_reason = None, None, None
+          if update.branch:
+              skip_reason = f"not pinned, following branch {update.branch}"
+          elif to_ver := latest_ver(update_policy, update):
+              to_sha = update_module(update.path, root, to_ver.tag)
+          else:
+              skip_reason = "no suitable update found"
+          results.append(UpdateResult(update.path, update.current, current_sha, to_ver, to_sha, skip_reason))
+      return results
+
+
+def update_kind(from_ver: Semver, to_ver: Semver) -> str:
+    f = next(
+        (i for i, (x, y) in enumerate(zip(from_ver, to_ver)) if x != y),
+        None,
+    )
+    return Semver._fields[f]
+
+
+COMMIT_MSG_FILENAME = 'GUSTAV_COMMIT_MSG'
+
+
+def write_commit_message(root: str, message: str) -> str:
+    path = os.path.join(root, COMMIT_MSG_FILENAME)
+    with open(path, 'w') as f:
+        f.write(message)
+    return path
+
+
+def print_commit_hint(msg_path: str) -> None:
+    print(f"\nCommit message saved to {msg_path}")
+    print(f"  Edit:     git commit -F {msg_path} -e")
+    print(f"  Commit:   git commit -F {msg_path}")
+
+
+def format_commit_message(results: list[UpdateResult]) -> str:
+    lines = []
+    updated = [r for r in results if r.to_ver is not None]
+    skipped = [r for r in results if r.to_ver is None]
+    if len(updated):
+        lines.append(f"\nUpdated {len(updated)} module{'s' if len(updated) > 1 else ''}:")
+    for r in updated:
+        from_ver = r.from_ver.tag if r.from_ver else '-'
+        kind = update_kind(r.from_ver, r.to_ver) if r.from_ver else 'major'
+        lines.append(f"\t{r.path}: {kind} update {r.from_sha} ({from_ver}) -> {r.to_sha} ({r.to_ver.tag})")
+    if len(skipped):
+        lines.append(f"\nSkipped {len(skipped)} module{'s' if len(skipped) > 1 else ''}:")
+    for r in skipped:
+        lines.append(f"\t{r.path}: {r.skip_reason}")
+    return '\n'.join(lines)
+
 
 def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     path = module['path']
@@ -172,13 +228,21 @@ def main() -> None:
         git_root = git(['rev-parse', '--show-toplevel'], root)
     except subprocess.CalledProcessError as e:
         print(e.stderr.strip())
-        sys.exit(1)
+        sys.exit(127)
 
     modules = parse_gitmodules(git_root)
     results = [r for module in modules.values() if (r := check_submodule_updates(module, git_root))]
     print_updates_table(results)
     if len(results) and args.update:
-        update_submodules(git_root, results, args.update_policy)
+        results = update_submodules(git_root, results, args.update_policy)
+        message = format_commit_message(results)
+        print(message)
+        if any(r.to_ver for r in results):
+            dot_git_dir = git(['rev-parse', '--absolute-git-dir'], cwd=git_root)
+            msg_path = write_commit_message(dot_git_dir, message)
+            print_commit_hint(msg_path)
+        else:
+            sys.exit(1)
 
 if __name__ == '__main__':
     main()
