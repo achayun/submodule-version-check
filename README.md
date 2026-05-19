@@ -4,6 +4,33 @@
 It solves a common submodule maintenance problem: knowing whether pinned submodules have newer tagged releases available, without blindly updating them or inspect every dependent repository by hand.
 It is intended for CI visibility and maintainer review. It does not update submodules unless run with the `update` command.
 
+## Example Output
+
+```
+$ gustav.py
+Path      Current  Patch   Minor   Major   Branch
+libs/foo  v1.0.0   v1.0.1  v1.1.0  v2.0.0  -
+libs/bar  v1.0.0   v1.0.1  -       -       -
+libs/baz  v1.0.0   v1.0.1  -       -       main
+
+$ gustav.py update --update-policy minor
+Path      Current  Patch   Minor   Major   Branch
+libs/foo  v1.0.0   v1.0.1  v1.1.0  v2.0.0  -
+libs/bar  v1.0.0   v1.0.1  -       -       -
+libs/baz  v1.0.0   v1.0.1  -       -       main
+
+Updated 2 modules:
+	libs/foo: minor update eb05c5c (v1.0.0) -> 767fc5a (v1.1.0)
+	libs/bar: patch update eb05c5c (v1.0.0) -> dc320a7 (v1.0.1)
+
+Skipped 1 module:
+	libs/baz: not pinned, following branch main
+
+Commit message saved to <repo>/.git/GUSTAV_COMMIT_MSG
+  Edit:     git commit -F <repo>/.git/GUSTAV_COMMIT_MSG -e
+  Commit:   git commit -F <repo>/.git/GUSTAV_COMMIT_MSG
+```
+
 ## What it does
 
 For each Git submodule, `gustav.py`:
