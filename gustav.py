@@ -130,7 +130,7 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
     all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
     current = max(head_versions) if head_versions else None
-    branch = module['branch']
+    branch = module['branch'] if 'branch' in module else None
     patch, minor, major = find_updates(current, all_versions)
 
     return SemverUpdates(
