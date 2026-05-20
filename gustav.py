@@ -88,10 +88,10 @@ def check_submodule_clean(path: str, root: str) -> str | None:
         return(f"submodule not initialized")
     if git(['status', '--porcelain', '--untracked-files=no'], cwd=abspath):
         return "working tree has uncommitted changes"
-    head = git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
-    recorded = git(['rev-parse', '--short', f'HEAD:{path}'], cwd=root)
+    head = git(['rev-parse', 'HEAD'], cwd=abspath)
+    recorded = git(['rev-parse', f'HEAD:{path}'], cwd=root)
     if head != recorded:
-        return f"HEAD {head} does not match recorded gitlink {recorded}"
+        return f"HEAD {head[:7]} does not match recorded gitlink {recorded[:7]}"
     return None
 
 
