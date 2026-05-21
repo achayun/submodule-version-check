@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from typing import NamedTuple, NoReturn
 
 # Regex to break a semver string to a tuple.
@@ -209,6 +210,23 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     )
 
 
+def to_json(obj):
+    if isinstance(obj, tuple) and hasattr(obj, "_fields") and hasattr(obj, "_asdict"):
+        return {k: to_json(v) for k, v in obj._asdict().items()}
+
+    elif isinstance(obj, Mapping):
+        return {k: to_json(v) for k, v in obj.items()}
+
+    elif isinstance(obj, (list, tuple)):
+        return [to_json(v) for v in obj]
+
+    return obj
+
+
+def print_updates_json(results: list[SemverUpdates]) -> None:
+    print(json.dumps(to_json(results), indent=2))
+
+
 def print_updates_table(results: list[SemverUpdates]) -> None:
     headers = [field.capitalize() for field in SemverUpdates._fields]
     rows = [
@@ -238,8 +256,10 @@ def main() -> None:
         description='Check git submodules for newer semver releases.',
     )
     parser.add_argument('--root', default='.', help='repository root (default: cwd)')
-    parser.add_argument('--update', action='store_true', help='Perform updates on suitable submodules')
     parser.add_argument('--update-policy', default='patch', choices=['patch', 'minor', 'major'], help='Update policy (default: patch)')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--update', action='store_true', help='Perform updates on suitable submodules')
+    mode.add_argument('--json', action='store_true', help='List update candidates as JSON output')
     args = parser.parse_args()
     root = os.path.abspath(args.root)
     try:
@@ -252,7 +272,10 @@ def main() -> None:
         fatal(f"No submodules found in {git_root}", 0)
 
     results = [check_submodule_updates(m, git_root) for m in modules.values()]
-    print_updates_table(results)
+    if args.json:
+        print_updates_json(results)
+    else:
+        print_updates_table(results)
 
     if not args.update:
         has_updates = any(r.patch or r.minor or r.major for r in results)
