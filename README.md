@@ -55,6 +55,18 @@ Policies define the maximum allowed upgrade class:
 
 Submodules that are configured to track a branch in .gitmodules are skipped in the update.
 
+## Exit codes
+
+Check mode (without `--update`):
+
+- `0`: all submodules are up to date.
+- `1`: at least one submodule has a candidate.
+
+In update mode (`--update`):
+- `1`: no submodule was updated.
+- `0`: at least one update was applied.
+- `127`: An error occurred during update.
+
 ## Limitations
 
 `gustav` does not resolve dependency constraints, compatibility rules, release metadata, changelogs, or transitive requirements.

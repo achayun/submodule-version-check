@@ -255,7 +255,8 @@ def main() -> None:
     print_updates_table(results)
 
     if not args.update:
-        return
+        has_updates = any(r.patch or r.minor or r.major for r in results)
+        sys.exit(1 if has_updates else 0)
 
     results = update_submodules(git_root, results, args.update_policy)
     message = format_commit_message(results)
