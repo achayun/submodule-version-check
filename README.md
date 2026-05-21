@@ -67,6 +67,21 @@ In update mode (`--update`):
 - `0`: at least one update was applied.
 - `127`: An error occurred during update.
 
+## Comparison With Similar Tools
+
+| Tool | Semver candidates | Policy updates | Deployment |
+|---|---|---|---|
+| `git submodule update --remote` | No | No | Built-in, follows branch HEAD in .gitmodules |
+| Renovate (`git-submodules` manager) | Not yet (tag mode is an open issue) | No | Hosted/self-hosted bot |
+| Dependabot (`gitsubmodule`) | Partial — tagged commits trumps untagged; no semver hierarchical split | No | GitHub |
+| **gustav** | **Yes — patch, minor, major** | **Yes — `patch|minor|major`** | Local CLI / CI step |
+
+## Planned for 1.2
+
+- **Semver Pre-release filtering.** Versions like `2.0.0-rc.1` are currently considered major candidates. Add `--include-prereleases` (default off) and add detailed skip reason.
+- **Tag prefix support.** Repos with multiple version streams tend to use prefixes (e.g. `lib-v1.0`, `core-v1.0`). Add `--tag-prefix` to the scan.
+- **Submodule allow/deny list.** Skip specific modules or limit to a subset — similar to Renovate's `ignoreDeps`.
+
 ## Limitations
 
 `gustav` does not resolve dependency constraints, compatibility rules, release metadata, changelogs, or transitive requirements.
