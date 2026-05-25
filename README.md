@@ -82,7 +82,7 @@ In update mode (`--update`):
 | `git submodule update --remote` | No | No | Built-in, follows branch HEAD in .gitmodules |
 | Renovate (`git-submodules` manager) | Not yet (tag mode is an open issue) | No | Hosted/self-hosted bot |
 | Dependabot (`gitsubmodule`) | Partial — tagged commits trumps untagged; no semver hierarchical split | No | GitHub |
-| **gustav** | **Yes** | **Yes — patch|minor|major** | Local CLI / CI step |
+| **gustav** | Yes | Yes — `patch|minor|major` | Local CLI / CI step |
 
 ## Planned Improvements
 
