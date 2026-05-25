@@ -58,7 +58,9 @@ Submodules that are configured to track a branch in .gitmodules are skipped in t
 ## Tag prefix pinning
 
 Some repositories prefix the semver tag, for example for multiple streams or different component in one repo (e.g. `lib-v1.0.0`, `testing/v1.0.0`, `client-go/v1.0.0`).
+
 `gustav` captures the prefix when parsing each tag and only considers candidates with same prefix as the current tag. For example a submodule pinned at `lib-v1.0.0` sees `lib-v1.0.1` as a patch and ignores `core-v9.9.9`.
+
 Note: If a submodule's HEAD points to several version tags, vanilla version takes precedence over prefixed one.
 
 ## Exit codes
