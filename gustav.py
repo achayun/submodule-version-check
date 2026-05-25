@@ -288,7 +288,7 @@ def main() -> None:
 
     if not args.update:
         has_updates = any(r.patch or r.minor or r.major for r in results)
-        sys.exit(1 if has_updates else 0)
+        return 1 if has_updates else 0
 
     results = update_submodules(git_root, results, args.update_policy)
     message = format_commit_message(results)
@@ -298,8 +298,8 @@ def main() -> None:
         msg_path = write_commit_message(dot_git_dir, message)
         print_commit_hint(msg_path)
     else:
-        sys.exit(1)
+        return 1
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
 
