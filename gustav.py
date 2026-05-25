@@ -14,11 +14,14 @@ from typing import NamedTuple, NoReturn
 # * Accept optional 'v' prefix (e.g. v1.2.3)
 # * Case insensitive match
 # * Make Patch optional (e.g. 1.2 -> 1.2.0)
+# * Allow optional prefix (e.g. lib-v1.0.0, client-go/v.1.0.0)
 SEMVER_RE = re.compile(
-    r'^v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)(\.(?P<patch>0|[1-9]\d*))?(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-z-][0-9a-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][0-9a-z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-z-]+(?:\.[0-9a-z-]+)*))?$'
+    r'^(?P<prefix>[a-z][a-z0-9_-]*[-/])?v?(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)(\.(?P<patch>0|[1-9]\d*))?(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-z-][0-9a-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][0-9a-z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-z-]+(?:\.[0-9a-z-]+)*))?$'
 , re.IGNORECASE)
 
+
 class Semver(NamedTuple):
+    prefix: str
     major: int
     minor: int
     patch: int
@@ -32,6 +35,7 @@ def parse_semver(tag: str) -> Semver | None:
     if not m:
         return None
     return Semver(
+        m.group('prefix') or '',
         int(m.group('major')),
         int(m.group('minor')),
         int(m.group('patch')) if m.group('patch') else 0,
@@ -49,7 +53,7 @@ def find_updates(current: Semver | None, versions: list[Semver]) -> list[Semver]
     if current is None:
         return None, None, max(versions, default=None)
 
-    newer = [v for v in versions if v > current]
+    newer = [v for v in versions if v > current and current.prefix == v.prefix]
     patch = max((v for v in newer if v.major == current.major and v.minor == current.minor), default=None)
     minor = max((v for v in newer if v.major == current.major and v.minor > current.minor), default=None)
     major = max((v for v in newer if v.major > current.major), default=None)
@@ -141,8 +145,12 @@ def update_submodules(root: str, updates: list[SemverUpdates], update_policy: st
               skip_reason = f"not pinned, following branch {update.branch}"
           elif module_err := check_submodule_clean(update.path, root):
               skip_reason = f"module state not clean: {module_err}"
-          elif to_ver := latest_ver(update_policy, update):
-              to_sha = update_submodule(update.path, root, to_ver.tag)
+          elif latest := latest_ver(update_policy, update):
+              if update.current and update.current.prefix and latest.prefix != update.current.prefix:
+                  skip_reason = (f"module pinned to prefix: {update.current.prefix}")
+              else:
+                  to_ver = latest
+                  to_sha = update_submodule(update.path, root, to_ver.tag)
           else:
               skip_reason = "no suitable update found"
           results.append(UpdateResult(update.path, update.current, current_sha, to_ver, to_sha, skip_reason))
@@ -199,7 +207,8 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
     fetch_tags(abspath)
     head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
     all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
-    current = max(head_versions) if head_versions else None
+    # Prefer plain semver over prefix ones.
+    current = max(head_versions, key=lambda v: (v.prefix == '', v)) if head_versions else None
     branch = module['branch'] if 'branch' in module else None
     patch, minor, major = find_updates(current, all_versions)
 

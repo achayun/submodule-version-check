@@ -55,6 +55,12 @@ Policies define the maximum allowed upgrade class:
 
 Submodules that are configured to track a branch in .gitmodules are skipped in the update.
 
+## Tag prefix pinning
+
+Some repositories prefix the semver tag, for example for multiple streams or different component in one repo (e.g. `lib-v1.0.0`, `testing/v1.0.0`, `client-go/v1.0.0`).
+`gustav` captures the prefix when parsing each tag and only considers candidates with same prefix as the current tag. For example a submodule pinned at `lib-v1.0.0` sees `lib-v1.0.1` as a patch and ignores `core-v9.9.9`.
+Note: If a submodule's HEAD points to several version tags, vanilla version takes precedence over prefixed one.
+
 ## Exit codes
 
 Check mode (without `--update`):
@@ -76,11 +82,11 @@ In update mode (`--update`):
 | Dependabot (`gitsubmodule`) | Partial — tagged commits trumps untagged; no semver hierarchical split | No | GitHub |
 | **gustav** | **Yes — patch, minor, major** | **Yes — `patch|minor|major`** | Local CLI / CI step |
 
-## Planned for 1.2
+## Planned Improvements
 
 - **Semver Pre-release filtering.** Versions like `2.0.0-rc.1` are currently considered major candidates. Add `--include-prereleases` (default off) and add detailed skip reason.
-- **Tag prefix support.** Repos with multiple version streams tend to use prefixes (e.g. `lib-v1.0`, `core-v1.0`). Add `--tag-prefix` to the scan.
 - **Submodule allow/deny list.** Skip specific modules or limit to a subset — similar to Renovate's `ignoreDeps`.
+- **Forced-push tag detection** Detect and reflect the case where current tag points to a different hash than the hash of the same tag on the remote.
 
 ## Limitations
 
