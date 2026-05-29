@@ -1,5 +1,4 @@
 import argparse
-import configparser
 import json
 import os
 import re
@@ -61,21 +60,30 @@ def find_updates(current: Semver | None, versions: list[Semver]) -> list[Semver]
 
 
 def parse_gitmodules(root: str) -> dict:
-    config = configparser.ConfigParser(interpolation=None, strict=True, empty_lines_in_values=False)
-    config.read(os.path.join(root, '.gitmodules'))
+    gitmodules = os.path.join(root, '.gitmodules')
+
+    if not os.path.exists(gitmodules):
+        return {}
+
+    # Use git -z to output null terminated entries like: "key\nvalue\0"
+    out = git(['config', '-z', '--file', gitmodules, '--list'], cwd=root)
+
     modules = {}
-    for section in config.sections():
-        if section.startswith('submodule '):
-            data = dict(config[section])
-            if subpath := data.get('path'):
-                modules[subpath] = data
-                modules[subpath]['path'] = subpath
+
+    for entry in filter(lambda e: e.startswith('submodule.'), out.split('\0')):
+        key, _, value = entry.partition('\n')
+
+        # Important: submodule names can contain dots, so split from the right.
+        name, sep, field = key[len('submodule.'):].rpartition('.')
+        if sep:
+            modules.setdefault(name, {})[field] = value
+
     return modules
 
 
 def git(args: list, cwd: str) -> str:
     p = subprocess.run(
-        ['git'] + args, cwd = cwd, capture_output = True, text = True, check = True,
+        ['git'] + args, cwd=cwd, capture_output=True, text=True, check=True,
     )
     return p.stdout.strip()
 
