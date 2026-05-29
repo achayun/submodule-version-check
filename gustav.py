@@ -24,8 +24,8 @@ class Semver(NamedTuple):
     major: int
     minor: int
     patch: int
-    prerelease: str | None
-    buildmetadata: str | None
+    prerelease: str
+    buildmetadata: str
     tag: str    # The original string that was parsed, kept last to maintain tuple ordering
 
 
@@ -38,8 +38,8 @@ def parse_semver(tag: str) -> Semver | None:
         int(m.group('major')),
         int(m.group('minor')),
         int(m.group('patch')) if m.group('patch') else 0,
-        m.group('prerelease'),
-        m.group('buildmetadata'),
+        m.group('prerelease') or '',
+        m.group('buildmetadata') or '',
         tag,
     )
 
