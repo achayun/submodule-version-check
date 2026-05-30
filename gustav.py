@@ -66,11 +66,11 @@ def parse_gitmodules(root: str) -> dict:
         return {}
 
     # Use git -z to output null terminated entries like: "key\nvalue\0"
-    out = git(['config', '-z', '--file', gitmodules, '--list'], cwd=root)
+    out = git(['config', '-z', '--file', gitmodules, '--get-regexp', '^submodule'], cwd=root)
 
     modules = {}
 
-    for entry in filter(lambda e: e.startswith('submodule.'), out.split('\0')):
+    for entry in out.split('\0'):
         key, _, value = entry.partition('\n')
 
         # Important: submodule names can contain dots, so split from the right.
