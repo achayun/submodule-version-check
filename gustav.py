@@ -88,21 +88,26 @@ def git(args: list, cwd: str) -> str:
     return p.stdout.strip()
 
 
-def fetch_tags(abspath: str):
-    shallow = git(['rev-parse', '--is-shallow-repository'], cwd=abspath)
-    is_shallow = shallow == 'true'
-    args = ['fetch', '--unshallow', '--tags'] if is_shallow else ['fetch', '--tags']
-    result = git(args, cwd=abspath)
+def fetch_tags(abspath: str) -> str | None:
+    try:
+        shallow = git(['rev-parse', '--is-shallow-repository'], cwd=abspath)
+        is_shallow = shallow == 'true'
+        args = ['fetch', '--unshallow', '--tags'] if is_shallow else ['fetch', '--tags']
+        git(args, cwd=abspath)
+    except subprocess.CalledProcessError:
+        return f"could not fetch tags from remote"
+    return None
 
 
 def check_submodule_clean(path: str, root: str) -> str | None:
     abspath = os.path.abspath(os.path.join(root, path))
-    if not os.path.isfile(os.path.join(abspath, '.git')):
-        return(f"submodule not initialized")
     if git(['status', '--porcelain', '--untracked-files=no'], cwd=abspath):
         return "working tree has uncommitted changes"
     head = git(['rev-parse', 'HEAD'], cwd=abspath)
-    recorded = git(['rev-parse', f'HEAD:{path}'], cwd=root)
+    try:
+        recorded = git(['rev-parse', f'HEAD:{path}'], cwd=root)
+    except subprocess.CalledProcessError:
+        return "submodule added but not committed (no gitlink recorded in HEAD)"
     if head != recorded:
         return f"HEAD {head[:7]} does not match recorded gitlink {recorded[:7]}"
     return None
@@ -122,6 +127,7 @@ class SemverUpdates(NamedTuple):
     minor: Semver | None
     major: Semver | None
     branch: str | None
+    skip_reason: str | None = None
 
 
 class UpdateResult(NamedTuple):
@@ -130,7 +136,7 @@ class UpdateResult(NamedTuple):
     from_sha: str | None
     to_ver: Semver | None
     to_sha: str | None
-    skip_reason: str | None
+    skip_reason: str | None = None
 
 
 def latest_ver(update_policy: str, update: SemverUpdates) -> Semver | None:
@@ -206,25 +212,23 @@ def format_commit_message(results: list[UpdateResult]) -> str:
     return '\n'.join(lines)
 
 
-def check_submodule_updates(module: dict, root: str) -> SemverUpdates | None:
+def check_submodule_updates(module: dict, root: str) -> SemverUpdates:
     path = module['path']
+    branch = module.get('branch')
     abspath = os.path.abspath(os.path.join(root, path))
     if not os.path.isfile(os.path.join(abspath, '.git')):
-        raise Exception(f"Cannot find submodule at path: '{abspath}'")
+        return SemverUpdates(path, None, None, None, None, branch, "submodule not initialized")
 
-    fetch_tags(abspath)
+    if reason := fetch_tags(abspath):
+        return SemverUpdates(path, None, None, None, None, branch, reason)
+
     head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
     all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
     # Prefer plain semver over prefix ones.
     current = max(head_versions, key=lambda v: (v.prefix == '', v)) if head_versions else None
-    branch = module['branch'] if 'branch' in module else None
     patch, minor, major = find_updates(current, all_versions)
 
-    return SemverUpdates(
-        path  =  path, current=current,
-        patch  =  patch, minor=minor, major = major,
-        branch = branch,
-    )
+    return SemverUpdates(path, current, patch, minor, major, branch)
 
 
 def to_json(obj):
@@ -245,7 +249,7 @@ def print_updates_json(results: list[SemverUpdates]) -> None:
 
 
 def print_updates_table(results: list[SemverUpdates]) -> None:
-    headers = [field.capitalize() for field in SemverUpdates._fields]
+    headers = [field.replace("_", " ").title() for field in SemverUpdates._fields]
     rows = [
         [r.path,
          r.current.tag if r.current else '-',
@@ -253,6 +257,7 @@ def print_updates_table(results: list[SemverUpdates]) -> None:
          r.minor.tag if r.minor else '-',
          r.major.tag if r.major else '-',
          r.branch if r.branch else '-',
+         r.skip_reason if r.skip_reason else '',
         ]
         for r in results
     ]
@@ -281,8 +286,8 @@ def main() -> None:
     root = os.path.abspath(args.root)
     try:
         git_root = git(['rev-parse', '--show-toplevel'], root)
-    except subprocess.CalledProcessError as e:
-        fatal(f"error: not inside a git repository: {root}", 127)
+    except subprocess.CalledProcessError:
+        fatal(f"Not inside a git repository: {root}", 127)
 
     modules = parse_gitmodules(git_root)
     if not modules:
@@ -294,11 +299,11 @@ def main() -> None:
     else:
         print_updates_table(results)
 
+    has_updates = [r for r in results if (r.patch or r.minor or r.major) and not r.skip_reason]
     if not args.update:
-        has_updates = any(r.patch or r.minor or r.major for r in results)
-        return 1 if has_updates else 0
+        return 1 if len(has_updates) else 0
 
-    results = update_submodules(git_root, results, args.update_policy)
+    results = update_submodules(git_root, has_updates, args.update_policy)
     message = format_commit_message(results)
     print(message)
     if any(r.to_ver for r in results):
