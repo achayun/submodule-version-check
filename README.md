@@ -8,10 +8,11 @@ It is intended for CI visibility and maintainer review. It does not update submo
 
 ```
 $ gustav.py
-Path      Current  Patch   Minor   Major   Branch
-libs/foo  v1.0.0   v1.0.1  v1.1.0  v2.0.0  -
-libs/bar  v1.0.0   v1.0.1  -       -       -
-libs/baz  v1.0.0   v1.0.1  -       -       main
+Path        Current       Patch   Minor   Major         Branch
+libs/foo    v1.0.0        v1.0.1  v1.1.0  v2.0.0        -
+libs/bar    v1.0.0        v1.0.1  -       -             -
+libs/baz    v1.0.0        v1.0.1  -       -             main
+contrib/zoo stable-v1.2.0 -       -       stable-v2.0.0
 
 $ gustav.py --update --update-policy minor
 Path      Current  Patch   Minor   Major   Branch
