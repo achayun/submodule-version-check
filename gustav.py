@@ -88,15 +88,22 @@ def git(args: list, cwd: str) -> str:
     return p.stdout.strip()
 
 
-def fetch_tags(abspath: str) -> str | None:
-    try:
-        shallow = git(['rev-parse', '--is-shallow-repository'], cwd=abspath)
-        is_shallow = shallow == 'true'
-        args = ['fetch', '--unshallow', '--tags'] if is_shallow else ['fetch', '--tags']
-        git(args, cwd=abspath)
-    except subprocess.CalledProcessError:
-        return f"could not fetch tags from remote"
-    return None
+def remote_tags(abspath: str) -> dict[str, str]:
+    tags = {}
+    for line in git(['ls-remote', '--tags', 'origin'], cwd=abspath).splitlines():
+        sha, ref = line.split('\t')
+        name = ref.removeprefix('refs/tags/')
+        if name.endswith('^{}'):
+            # An annotated tag's peeled entry: the commit it points to
+            tags[name[:-3]] = sha
+        else:
+            tags.setdefault(name, sha)
+    return tags
+
+
+def fetch_tag(abspath: str, tag: str) -> None:
+    shallow = git(['rev-parse', '--is-shallow-repository'], cwd=abspath) == 'true'
+    git(['fetch', *(['--depth', '1'] if shallow else []), 'origin', 'tag', tag], cwd=abspath)
 
 
 def check_submodule_clean(path: str, root: str) -> str | None:
@@ -115,6 +122,7 @@ def check_submodule_clean(path: str, root: str) -> str | None:
 
 def update_submodule(path: str, root: str, tag: str) -> str:
     abspath = os.path.abspath(os.path.join(root, path))
+    fetch_tag(abspath, tag)
     git(['checkout', '--recurse-submodules', tag], cwd=abspath)
     git(['add', abspath], cwd=root)
     return git(['rev-parse', '--short', 'HEAD'], cwd=abspath)
@@ -216,14 +224,19 @@ def check_submodule_updates(module: dict, root: str) -> SemverUpdates:
     path = module['path']
     branch = module.get('branch')
     abspath = os.path.abspath(os.path.join(root, path))
-    if not os.path.isfile(os.path.join(abspath, '.git')):
+    # A file for an absorbed git dir, a directory for an embedded one
+    if not os.path.exists(os.path.join(abspath, '.git')):
         return SemverUpdates(path, None, None, None, None, branch, "submodule not initialized")
 
-    if reason := fetch_tags(abspath):
+    try:
+        tags = remote_tags(abspath)
+    except subprocess.CalledProcessError as e:
+        reason = f"could not fetch tags from remote: {'|'.join(e.stderr.splitlines())}"
         return SemverUpdates(path, None, None, None, None, branch, reason)
 
-    head_versions = parse_tags_to_semver(git(['tag', '--points-at', 'HEAD'], abspath).splitlines())
-    all_versions = parse_tags_to_semver(git(['tag', '-l'], abspath).splitlines())
+    head = git(['rev-parse', 'HEAD'], abspath)
+    head_versions = parse_tags_to_semver([t for t, sha in tags.items() if sha == head])
+    all_versions = parse_tags_to_semver(list(tags))
     # Prefer plain semver over prefix ones.
     current = max(head_versions, key=lambda v: (v.prefix == '', v)) if head_versions else None
     patch, minor, major = find_updates(current, all_versions)
